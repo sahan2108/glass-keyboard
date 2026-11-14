@@ -74,14 +74,6 @@ object Layouts {
         return out
     }
 
-    val emojis = listOf(
-        "😀", "😂", "🥹", "😍", "😘", "😎", "🤔", "😢",
-        "😭", "😡", "😅", "🥰", "😴", "🤯", "🙄", "😇",
-        "👍", "👎", "🙏", "👏", "💪", "🤝", "👌", "✌️",
-        "🔥", "✨", "❤️", "💔", "🎉", "💯", "⭐", "🌙",
-        "🎬", "🎨", "📷", "💻", "📱", "🚀", "✅", "❌"
-    )
-
     val words = listOf(
         "the", "this", "that", "there", "then", "they", "them", "thank", "thanks", "to", "too",
         "hello", "hi", "how", "have", "has", "had", "here", "he", "her", "his", "help",

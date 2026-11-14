@@ -25,11 +25,28 @@ class GlassKeyboardService : InputMethodService() {
     private var view: GlassKeyboardView? = null
     private val avro = StringBuilder()
     private var lastShiftTap = 0L
+    private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences("glasskb", Context.MODE_PRIVATE)
         lang = Lang.values().getOrElse(prefs.getInt("lang", 0)) { Lang.EN }
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val l = ClipboardManager.OnPrimaryClipChangedListener { captureClip() }
+            cm.addPrimaryClipChangedListener(l)
+            clipListener = l
+        } catch (_: Throwable) {
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            val l = clipListener
+            if (l != null) (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).removePrimaryClipChangedListener(l)
+        } catch (_: Throwable) {
+        }
+        super.onDestroy()
     }
 
     override fun onEvaluateFullscreenMode(): Boolean = false
@@ -49,6 +66,7 @@ class GlassKeyboardService : InputMethodService() {
         super.onStartInputView(info, restarting)
         avro.setLength(0)
         page = 0
+        captureClip()
         if (shift == 2) shift = 0
         updateAutoCaps()
         view?.rebuild()
@@ -260,10 +278,61 @@ class GlassKeyboardService : InputMethodService() {
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
     }
 
-    fun pasteClipboard() {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text ?: return
-        commit(t.toString())
+    // ---------- emoji recents ----------
+
+    fun recentEmojis(): List<String> {
+        val raw = prefs.getString("recents", "") ?: ""
+        return if (raw.isEmpty()) emptyList() else raw.split('\u0001')
+    }
+
+    fun commitEmoji(e: String) {
+        commit(e)
+        val l = recentEmojis().toMutableList()
+        l.remove(e)
+        l.add(0, e)
+        while (l.size > 32) l.removeAt(l.size - 1)
+        prefs.edit().putString("recents", l.joinToString("\u0001")).apply()
+    }
+
+    // ---------- clipboard history (keeps the last 30 copied texts) ----------
+
+    fun clipItems(): List<String> {
+        val raw = prefs.getString("clips", "") ?: ""
+        return if (raw.isEmpty()) emptyList() else raw.split('\u0001')
+    }
+
+    private fun saveClips(l: List<String>) {
+        prefs.edit().putString("clips", l.joinToString("\u0001")).apply()
+    }
+
+    private fun addClip(t: String) {
+        if (t.isBlank()) return
+        val l = clipItems().toMutableList()
+        l.remove(t)
+        l.add(0, t)
+        while (l.size > 30) l.removeAt(l.size - 1)
+        saveClips(l)
+    }
+
+    fun removeClip(t: String) {
+        saveClips(clipItems().filter { it != t })
+    }
+
+    fun clearClips() {
+        saveClips(emptyList())
+    }
+
+    private fun captureClip() {
+        try {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = cm.primaryClip ?: return
+            if (clip.itemCount == 0) return
+            val extras = clip.description.extras
+            if (extras != null && extras.getBoolean("android.content.extra.IS_SENSITIVE", false)) return
+            val t = clip.getItemAt(0).coerceToText(this)?.toString() ?: return
+            addClip(t)
+        } catch (_: Throwable) {
+        }
     }
 
     fun cycleSize() {
