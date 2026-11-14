@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Build
@@ -31,6 +32,7 @@ class GlassKeyboardService : InputMethodService() {
         super.onCreate()
         prefs = getSharedPreferences("glasskb", Context.MODE_PRIVATE)
         lang = Lang.values().getOrElse(prefs.getInt("lang", 0)) { Lang.EN }
+        Thread { try { Spell.suggest("a") } catch (_: Throwable) { } }.start()
         try {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val l = ClipboardManager.OnPrimaryClipChangedListener { captureClip() }
@@ -85,20 +87,25 @@ class GlassKeyboardService : InputMethodService() {
         applyWindowGlass()
     }
 
-    /** Frosted glass panel. Real blur-behind works on Android 12+ devices that allow it. */
+    /** iOS style = flat solid panel. Glass style = rounded frosted panel (blur on Android 12+). */
     private fun applyWindowGlass() {
         try {
             val w = window?.window ?: return
             val pal = Pal.make(this, prefs)
-            val r = dp(28f).toFloat()
-            val bg = GradientDrawable().apply {
-                cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
-                setColor(pal.panel)
-                setStroke(dp(1f), pal.panelRim)
+            if (pal.glass) {
+                val r = dp(28f).toFloat()
+                val bg = GradientDrawable().apply {
+                    cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+                    setColor(pal.panel)
+                    setStroke(dp(1f), pal.rim)
+                }
+                w.setFormat(PixelFormat.TRANSLUCENT)
+                w.setBackgroundDrawable(bg)
+                if (Build.VERSION.SDK_INT >= 31) w.setBackgroundBlurRadius(prefs.getInt("blur", 80))
+            } else {
+                w.setBackgroundDrawable(ColorDrawable(pal.panel))
+                if (Build.VERSION.SDK_INT >= 31) w.setBackgroundBlurRadius(0)
             }
-            w.setFormat(PixelFormat.TRANSLUCENT)
-            w.setBackgroundDrawable(bg)
-            if (Build.VERSION.SDK_INT >= 31) w.setBackgroundBlurRadius(prefs.getInt("blur", 80))
         } catch (_: Throwable) {
         }
     }
@@ -221,7 +228,7 @@ class GlassKeyboardService : InputMethodService() {
     }
 
     private fun updateAutoCaps() {
-        if (lang != Lang.EN || shift == 2) return
+        if (lang != Lang.EN || shift == 2 || !prefs.getBoolean("autocap", true)) return
         val ei = currentInputEditorInfo ?: return
         val ic = currentInputConnection ?: return
         val want = if (ei.inputType != 0 && ic.getCursorCapsMode(ei.inputType) != 0) 1 else 0
@@ -243,19 +250,15 @@ class GlassKeyboardService : InputMethodService() {
             if (avro.isEmpty()) view?.setSuggestions(listOf("", "", ""))
             return
         }
-        val w = wordBeforeCursor()
-        val list = if (w.isEmpty()) {
-            listOf("I", "The", "And")
-        } else {
-            val m = Layouts.words.filter { it.startsWith(w, ignoreCase = true) && !it.equals(w, ignoreCase = true) }
-            val cap = w[0].isUpperCase()
-            val fixed = m.take(2).map { if (cap) it.replaceFirstChar { ch -> ch.uppercase() } else it }
-            listOf(fixed.getOrElse(1) { "" }, w, fixed.getOrElse(0) { "" })
+        if (!prefs.getBoolean("suggest", true)) {
+            view?.setSuggestions(listOf("", "", ""))
+            return
         }
-        view?.setSuggestions(list)
+        view?.setSuggestions(Spell.suggest(wordBeforeCursor()))
     }
 
-    fun pickSuggestion(text: String) {
+    fun pickSuggestion(raw: String) {
+        val text = raw.trim('\u201C', '\u201D')
         if (text.isBlank()) return
         val ic = currentInputConnection ?: return
         if (lang == Lang.AVRO && avro.isNotEmpty()) {
@@ -333,6 +336,25 @@ class GlassKeyboardService : InputMethodService() {
             addClip(t)
         } catch (_: Throwable) {
         }
+    }
+
+    fun enterIsAction(): Boolean {
+        val ei = currentInputEditorInfo ?: return false
+        val opts = ei.imeOptions
+        val a = opts and EditorInfo.IME_MASK_ACTION
+        val no = (opts and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
+        return !no && a != EditorInfo.IME_ACTION_NONE && a != EditorInfo.IME_ACTION_UNSPECIFIED
+    }
+
+    fun cycleStyle() {
+        prefs.edit().putInt("style", 1 - prefs.getInt("style", 0)).apply()
+        applyWindowGlass()
+    }
+
+    fun toggleAutoCap() {
+        val on = !prefs.getBoolean("autocap", true)
+        prefs.edit().putBoolean("autocap", on).apply()
+        if (on) updateAutoCaps() else if (shift == 1) shift = 0
     }
 
     fun cycleSize() {

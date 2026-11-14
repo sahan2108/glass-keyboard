@@ -31,44 +31,36 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
     fun rebuild() {
         val prefs = ime.prefs
         val pal = Pal.make(context, prefs)
-        val scale = when (prefs.getInt("size", 1)) { 0 -> 0.85f; 2 -> 1.15f; else -> 1f }
-        val rowH = dp(46f * scale)
+        val scale = when (prefs.getInt("size", 1)) { 0 -> 0.88f; 2 -> 1.12f; else -> 1f }
+        val rowH = dp(52f * scale)
         val haptic = prefs.getBoolean("haptic", true)
 
         removeAllViews()
-        setPadding(dp(6f), dp(8f), dp(6f), dp(6f))
+        setPadding(dp(3f), dp(4f), dp(3f), dp(6f))
 
         addView(buildStrip(pal))
         if (showTools) addView(buildTools(pal))
 
-        if (showEmoji) {
-            buildEmoji(pal, rowH, haptic)
-            return
-        }
-        if (showClip) {
-            buildClip(pal, rowH, haptic)
-            return
-        }
+        if (showEmoji) { buildEmoji(pal, rowH, haptic); return }
+        if (showClip) { buildClip(pal, rowH, haptic); return }
 
+        val hot = ime.enterIsAction()
         val rows = Layouts.rows(ime.lang, ime.shift != 0, ime.page, prefs.getBoolean("numrow", false))
         for (row in rows) {
             val line = LinearLayout(context)
             line.orientation = HORIZONTAL
             for (k in row) {
                 if (k.type == KT.SPACER) {
-                    val sp = View(context)
-                    line.addView(sp, LayoutParams(0, rowH, k.w))
+                    line.addView(View(context), LayoutParams(0, rowH, k.w))
                     continue
                 }
                 val active = k.type == KT.SHIFT && ime.shift != 0
-                val label = when {
-                    k.type == KT.SHIFT && ime.shift == 2 -> "⇪"
-                    else -> k.label
-                }
+                val label = if (k.type == KT.SHIFT && ime.shift == 2) "⇪" else k.label
                 val key = GlassKey(
                     context, k.copy(label = label), pal, active, haptic,
                     { ime.onKey(it) },
-                    if (k.type == KT.LANG) ({ _: K -> ime.showPicker() }) else null
+                    if (k.type == KT.LANG) ({ _: K -> ime.showPicker() }) else null,
+                    hot
                 )
                 line.addView(key, LayoutParams(0, rowH, k.w))
             }
@@ -76,10 +68,10 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
         }
     }
 
-    private fun pill(pal: Pal, radius: Float): GradientDrawable = GradientDrawable().apply {
+    private fun card(pal: Pal, radius: Float): GradientDrawable = GradientDrawable().apply {
         cornerRadius = radius
-        setColor(pal.strip)
-        setStroke(dp(0.8f), pal.panelRim)
+        setColor(pal.key)
+        if (pal.glass) setStroke(dp(0.7f), pal.rim)
     }
 
     private fun label(pal: Pal, t: String, size: Float): TextView = TextView(context).apply {
@@ -93,19 +85,28 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
     private fun buildStrip(pal: Pal): View {
         val strip = LinearLayout(context)
         strip.orientation = HORIZONTAL
-        strip.background = pill(pal, dp(18f).toFloat())
-        val grid = label(pal, if (showTools) "✕" else "⊞", 18f)
-        grid.setOnClickListener { showTools = !showTools; if (!showTools) { showEmoji = false; showClip = false }; rebuild() }
-        strip.addView(grid, LayoutParams(dp(44f), dp(40f)))
+        strip.gravity = Gravity.CENTER_VERTICAL
+        val grid = IconView(context, if (showTools) Ic.CLOSE else Ic.GRID, pal)
+        grid.setOnClickListener {
+            showTools = !showTools
+            if (!showTools) { showEmoji = false; showClip = false }
+            rebuild()
+        }
+        strip.addView(grid, LayoutParams(dp(40f), dp(42f)))
         sugViews.clear()
         for (i in 0 until 3) {
+            val sepv = View(context)
+            sepv.setBackgroundColor(pal.sep)
+            val sl = LayoutParams(dp(0.7f).coerceAtLeast(1), dp(20f))
+            strip.addView(sepv, sl)
             val t = label(pal, sug.getOrElse(i) { "" }, 16f)
+            if (i == 1) t.setTypeface(t.typeface, android.graphics.Typeface.BOLD)
             t.setOnClickListener { ime.pickSuggestion(t.text.toString()) }
             sugViews.add(t)
-            strip.addView(t, LayoutParams(0, dp(40f), 1f))
+            strip.addView(t, LayoutParams(0, dp(42f), 1f))
         }
         val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-        lp.bottomMargin = dp(8f)
+        lp.bottomMargin = dp(4f)
         strip.layoutParams = lp
         return strip
     }
@@ -113,22 +114,21 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
     private fun buildTools(pal: Pal): View {
         val bar = LinearLayout(context)
         bar.orientation = HORIZONTAL
-        fun tool(icon: String, action: () -> Unit) {
-            val t = label(pal, icon, 20f)
-            t.background = pill(pal, dp(16f).toFloat())
-            t.setOnClickListener { action() }
-            val lp = LayoutParams(0, dp(40f), 1f)
-            lp.marginEnd = dp(4f)
-            bar.addView(t, lp)
+        val prefs = ime.prefs
+        fun tool(kind: Ic, on: Boolean, action: () -> Unit) {
+            val v = IconView(context, kind, pal, on)
+            v.setOnClickListener { action() }
+            bar.addView(v, LayoutParams(0, dp(40f), 1f))
         }
-        tool("😊") { showEmoji = true; emojiCat = if (ime.recentEmojis().isEmpty()) 1 else 0; rebuild() }
-        tool("📋") { showClip = true; rebuild() }
-        tool("Aa") { ime.cycleSize(); rebuild() }
-        tool("◐") { ime.cycleTheme(); rebuild() }
-        tool("123") { ime.toggleNumRow(); rebuild() }
-        tool("⚙") { ime.openSettings() }
+        tool(Ic.SMILE, false) { showEmoji = true; emojiCat = if (ime.recentEmojis().isEmpty()) 1 else 0; rebuild() }
+        tool(Ic.CLIP, false) { showClip = true; rebuild() }
+        tool(Ic.AUTOCAP, prefs.getBoolean("autocap", true)) { ime.toggleAutoCap(); rebuild() }
+        tool(Ic.STYLE, false) { ime.cycleStyle(); rebuild() }
+        tool(Ic.THEME, false) { ime.cycleTheme(); rebuild() }
+        tool(Ic.SIZE, false) { ime.cycleSize(); rebuild() }
+        tool(Ic.GEAR, false) { ime.openSettings() }
         val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
-        lp.bottomMargin = dp(8f)
+        lp.bottomMargin = dp(4f)
         bar.layoutParams = lp
         return bar
     }
@@ -162,11 +162,13 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
             tv.maxLines = 2
             tv.ellipsize = TextUtils.TruncateAt.END
             tv.setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
-            tv.background = pill(pal, dp(16f).toFloat())
+            tv.background = card(pal, dp(10f).toFloat())
             tv.setOnClickListener { ime.commit(t) }
             tv.setOnLongClickListener { ime.removeClip(t); rebuild(); true }
             val lp = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
             lp.topMargin = dp(6f)
+            lp.marginStart = dp(3f)
+            lp.marginEnd = dp(3f)
             box.addView(tv, lp)
         }
         val sv = ScrollView(context)
@@ -212,7 +214,7 @@ class GlassKeyboardView(ctx: Context, private val ime: GlassKeyboardService) : L
         bar.addView(back, LayoutParams(0, rowH, 1.4f))
         for (c in 0 until Emojis.icons.size) {
             val t = label(pal, Emojis.icons[c], 17f)
-            if (c == emojiCat) t.background = pill(pal, dp(12f).toFloat())
+            if (c == emojiCat) t.background = card(pal, dp(10f).toFloat())
             t.setOnClickListener { emojiCat = c; rebuild() }
             bar.addView(t, LayoutParams(0, rowH, 1f))
         }

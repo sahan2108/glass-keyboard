@@ -66,6 +66,20 @@ class SettingsActivity : Activity() {
         sizeGroup.setOnCheckedChangeListener { _, id -> prefs.edit().putInt("size", id - 100).apply() }
         root.addView(sizeGroup)
 
+        title("Style", 16f, true)
+        val styleGroup = RadioGroup(this)
+        styleGroup.orientation = RadioGroup.HORIZONTAL
+        val styles = listOf("iOS standard", "Glass")
+        for ((i, n) in styles.withIndex()) {
+            val rb = RadioButton(this)
+            rb.id = 300 + i
+            rb.text = n
+            styleGroup.addView(rb)
+        }
+        styleGroup.check(300 + prefs.getInt("style", 0))
+        styleGroup.setOnCheckedChangeListener { _, id -> prefs.edit().putInt("style", id - 300).apply() }
+        root.addView(styleGroup)
+
         title("Theme", 16f, true)
         val themeGroup = RadioGroup(this)
         themeGroup.orientation = RadioGroup.HORIZONTAL
@@ -80,6 +94,16 @@ class SettingsActivity : Activity() {
         themeGroup.setOnCheckedChangeListener { _, id -> prefs.edit().putInt("theme", id - 200).apply() }
         root.addView(themeGroup)
 
+        root.addView(Switch(this).apply {
+            text = "Auto capitalize"
+            isChecked = prefs.getBoolean("autocap", true)
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("autocap", on).apply() }
+        })
+        root.addView(Switch(this).apply {
+            text = "Word suggestions and spelling help"
+            isChecked = prefs.getBoolean("suggest", true)
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("suggest", on).apply() }
+        })
         root.addView(Switch(this).apply {
             text = "Number row"
             isChecked = prefs.getBoolean("numrow", false)
