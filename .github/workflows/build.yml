@@ -1,0 +1,33 @@
+name: Build APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Arrange files into Android project layout
+        run: |
+          mkdir -p app/src/main/java/com/studioerow/glasskb app/src/main/res/xml app/src/main/res/drawable
+          ls *.kt >/dev/null 2>&1 && mv -f *.kt app/src/main/java/com/studioerow/glasskb/
+          [ -f AndroidManifest.xml ] && mv -f AndroidManifest.xml app/src/main/
+          [ -f method.xml ] && mv -f method.xml app/src/main/res/xml/
+          [ -f ic_launcher.xml ] && mv -f ic_launcher.xml app/src/main/res/drawable/
+          [ -f app-build.gradle.kts ] && mv -f app-build.gradle.kts app/build.gradle.kts
+          find app -type f
+          true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GlassKeyboard-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
